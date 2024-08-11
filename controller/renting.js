@@ -1,5 +1,7 @@
 import User from '../models/user.js';
 import RentMachinery from '../models/rent_machinery.js';
+import { machinery_rented_owner } from '../mailer/machinery_rented_owner.js';
+import { machinery_rented_user } from '../mailer/machinery_rented_user.js';
 import axios from 'axios';
 
 export const rent_application = async (req, res) => {
@@ -68,7 +70,7 @@ export const rent_application = async (req, res) => {
 
 export const create_rent_application = async (req, res) => {
     try {
-        
+
         let reqbody = req.body.formValues;
         if (reqbody.rent < 0 || reqbody.quantity_available < 0) return res.status(400).send({ error: 'Invalid input!' });
 
@@ -86,10 +88,10 @@ export const create_rent_application = async (req, res) => {
         await RentMachinery.create({
             rent_id: rent_id,
             owner: req.user.username,
-            description: req.body.description,
-            category: req.body.category,
-            rent: req.body.rent,
-            quantity_available: req.body.quantity_available
+            description: reqbody.description,
+            category: reqbody.category,
+            rent: reqbody.rent,
+            quantity_available: reqbody.quantity_available
         });
 
         return res.status(200).send({ message: 'Rent application created successfully!' });
@@ -125,18 +127,24 @@ export const view_applications = async (req, res) => {
 
 export const rent_machinery = async (req, res) => {
     try {
-        
         let application = await RentMachinery.findOne({rent_id: req.body.rent_id});
         if (!application) return res.status(400).send({ error: 'No such rent application found!' });
         if (req.body.quantity_required < 1) return res.status(400).send({ error: 'Invalid input!' });
-        if (application.quantity_available == 0 || application.quantity_available < req.body.quantity_required) return res.status(400).send({ error: 'Machinery not available!' });
-
+        // if (application.quantity_available == 0 || application.quantity_available < req.body.quantity_required) return res.status(400).send({ error: 'Machinery not available!' });
+        if (isNaN(application.quantity_available) || application.quantity_available < req.body.quantity_available) {
+            return res.status(400).send({ error: 'Machinery not available!' });
+        }
         await RentMachinery.findOneAndUpdate({
             rent_id: req.body.rent_id
         }, {
-            $inc: { quantity_available: -req.body.quantity_required },
+            $inc: { quantity_available: -req.body.quantity_available },
             $push: { machinery_holder: req.user.username }
         });
+
+        let owner_details = await User.findOne({username: application.owner}, {name: 1, email: 1, contact: 1, username: 1});
+        let user_details = await User.findOne({username: req.user.username}, {name: 1, email: 1, contact: 1, username: 1});
+        machinery_rented_owner(owner_details, user_details, application, req.body.quantity_required);
+        machinery_rented_user(owner_details, user_details, application, req.body.quantity_required);
 
         return res.status(200).send({ message: 'Machinery rented successfully!' });
 
